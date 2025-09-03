@@ -26,8 +26,17 @@ def norm(s) -> str:
         return ""
     return "".join(str(s).split()).lower()
 
-def clean_header(header: str) -> str:
-    return header.replace(".", " ").strip()
+# 📝 REPLACE THE FOLLOWING FUNCTION
+# def clean_header(header: str) -> str:
+#     return header.replace(".", " ").strip()
+
+# 🚀 WITH THIS CORRECTED AND ROBUST VERSION
+def clean_header(header) -> str:
+    # Ensure the header is a string before performing string operations
+    if pd.isna(header):
+        return ""
+    header_str = str(header)
+    return header_str.replace(".", " ").strip()
 
 IMAGE_EXT_RE = re.compile(r"(?i)\.(jpe?g|png|gif|bmp|webp|tiff?)$")
 IMAGE_KEYWORDS = {
