@@ -209,11 +209,11 @@ def process_file(input_file, mode: str, marketplace: str, mapping_df: pd.DataFra
     ws_types.cell(row=1, column=t1_col, value="Option 1")
     ws_types.cell(row=2, column=t1_col, value="Option 1")
     ws_types.cell(row=3, column=t1_col, value="non mandatory")
-    ws_types.cell(row=4, column=t1_col, value="string")
+    ws_types.cell(row=4, column=t1_col, value="select")
     ws_types.cell(row=1, column=t2_col, value="Option 2")
     ws_types.cell(row=2, column=t2_col, value="Option 2")
     ws_types.cell(row=3, column=t2_col, value="non mandatory")
-    ws_types.cell(row=4, column=t2_col, value="string")
+    ws_types.cell(row=4, column=t2_col, value="select")
     
     # Get unique values to add to the 'Types' sheet for validation
     unique_opt1 = option1_data.dropna().unique().tolist()
