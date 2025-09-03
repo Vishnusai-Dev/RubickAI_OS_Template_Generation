@@ -73,10 +73,9 @@ def process_file(input_file, mode: str, marketplace: str, mapping_df: pd.DataFra
     """
     
     # 📝 Define marketplace-specific sheet, header, and data row configurations
-    # This dictionary makes it easy to add or change marketplace rules.
     marketplace_configs = {
         "Amazon": {"sheet": "Template", "header_row": 2, "data_row": 4, "sheet_index": None},
-        "Flipkart": {"sheet": None, "header_row": 1, "data_row": 5, "sheet_index": 2},
+        "Flipkart": {"sheet": None, "header_row": 1, "data_row": 5, "sheet_index": 2}, # This is the config we'll use
         "Myntra": {"sheet": None, "header_row": 3, "data_row": 4, "sheet_index": 1},
         "Ajio": {"sheet": None, "header_row": 2, "data_row": 3, "sheet_index": 2},
         "TataCliq": {"sheet": None, "header_row": 4, "data_row": 6, "sheet_index": 0},
@@ -85,29 +84,39 @@ def process_file(input_file, mode: str, marketplace: str, mapping_df: pd.DataFra
 
     config = marketplace_configs[marketplace]
     
-    # Identify the sheet to process
-    if config["sheet"] is not None:
-        sheet_name = config["sheet"]
-        sheet_index = None
-    else:
-        sheet_name = None
-        sheet_index = config["sheet_index"]
-
-    # Read the excel file based on the determined sheet, header, and data rows
-    # The `header` parameter is 0-indexed, so we subtract 1 from the row number.
-    # We skip rows from the beginning up to the data start row.
     try:
-        if sheet_name:
-            src_df = pd.read_excel(input_file, sheet_name=sheet_name, header=config["header_row"] - 1, skiprows=config["data_row"] - 1)
-        else:
+        if marketplace == "Flipkart":
+            # 🚀 Special handling for Flipkart
+            # Read the entire sheet first without a header
             xl = pd.ExcelFile(input_file)
-            src_df = xl.parse(xl.sheet_names[sheet_index], header=config["header_row"] - 1, skiprows=config["data_row"] - 1)
+            temp_df = xl.parse(xl.sheet_names[config["sheet_index"]], header=None)
+            
+            # The header is in row 1 (index 0)
+            header_row = config["header_row"] - 1 
+            # The data starts in row 5 (index 4)
+            data_start_row = config["data_row"] - 1
+
+            # Get the header row and clean it
+            headers = temp_df.iloc[header_row].tolist()
+            # Set the new DataFrame to start from the data row with the correct headers
+            src_df = temp_df.iloc[data_start_row:].copy()
+            src_df.columns = headers
+            
+        elif config["sheet"] is not None:
+            # Handle named sheets
+            src_df = pd.read_excel(input_file, sheet_name=config["sheet"], header=config["header_row"] - 1, skiprows=config["data_row"] - config["header_row"] - 1)
+        else:
+            # Handle sheets by index
+            xl = pd.ExcelFile(input_file)
+            src_df = xl.parse(xl.sheet_names[config["sheet_index"]], header=config["header_row"] - 1, skiprows=config["data_row"] - config["header_row"] - 1)
+            
     except Exception as e:
         st.error(f"Error reading file for {marketplace} template: {e}")
         return None
 
     # ────────── DROP COMPLETELY EMPTY COLUMNS ──────────
     src_df.dropna(axis=1, how='all', inplace=True)
+    # ... rest of your code
 
     columns_meta = []
 
