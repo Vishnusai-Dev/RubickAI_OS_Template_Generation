@@ -228,6 +228,56 @@ def process_file(input_file, mode: str, marketplace: str, mapping_df: pd.DataFra
     wb.save(buf)
     buf.seek(0)
     return buf
+# ────────── APPEND Flipkart-specific columns at the VERY END ──────────
+    if marketplace == "Flipkart":
+        # Exact-match the input headers (with a safe .strip() on the header names only here)
+        style_code_col = next((c for c in src_df.columns if str(c).strip() == "Style Code"), None)
+        seller_sku_col = next((c for c in src_df.columns if str(c).strip() == "Seller SKU ID"), None)
+
+        # Warn the user if columns are missing, and fall back to blanks
+        if style_code_col is None:
+            st.warning("Flipkart: 'Style Code' column not found in input. 'productId' will be blank.")
+            product_values = pd.Series([""] * len(src_df), dtype=str)
+        else:
+            product_values = src_df[style_code_col].fillna("").astype(str)
+
+        if seller_sku_col is None:
+            st.warning("Flipkart: 'Seller SKU ID' column not found in input. 'variantId' will be blank.")
+            variant_values = pd.Series([""] * len(src_df), dtype=str)
+        else:
+            variant_values = src_df[seller_sku_col].fillna("").astype(str)
+
+        # Place AFTER Option 1 & Option 2 (i.e., at the last)
+        # Current last data columns in Values are opt2_col; append next.
+        variant_col = max(opt1_col, opt2_col) + 1
+        product_col = variant_col + 1
+
+        # Write headers to Values
+        ws_vals.cell(row=1, column=variant_col, value="variantId")
+        ws_vals.cell(row=1, column=product_col, value="productId")
+
+        # Write data to Values (treat as text)
+        for i, v in enumerate(variant_values.tolist(), start=2):
+            cell = ws_vals.cell(row=i, column=variant_col, value=v if v else None)
+            cell.number_format = "@"
+        for i, v in enumerate(product_values.tolist(), start=2):
+            cell = ws_vals.cell(row=i, column=product_col, value=v if v else None)
+            cell.number_format = "@"
+
+        # Mirror in Types using your existing +2 offset convention
+        t_variant_col = variant_col + 2
+        t_product_col = product_col + 2
+
+        # Types: Row1 & Row2 = header; Row3 = "mandatory"; Row4 = "string"
+        ws_types.cell(row=1, column=t_variant_col, value="variantId")
+        ws_types.cell(row=2, column=t_variant_col, value="variantId")
+        ws_types.cell(row=3, column=t_variant_col, value="mandatory")
+        ws_types.cell(row=4, column=t_variant_col, value="string")
+
+        ws_types.cell(row=1, column=t_product_col, value="productId")
+        ws_types.cell(row=2, column=t_product_col, value="productId")
+        ws_types.cell(row=3, column=t_product_col, value="mandatory")
+        ws_types.cell(row=4, column=t_product_col, value="string")
 
 # ───────────────────────── STREAMLIT UI ─────────────────────────
 st.set_page_config(page_title="SKU Template Automation", layout="wide")
