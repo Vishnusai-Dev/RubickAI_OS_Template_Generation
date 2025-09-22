@@ -75,7 +75,7 @@ def process_file(input_file, mode: str, marketplace: str, mapping_df: pd.DataFra
     # 📝 Define marketplace-specific sheet, header, and data row configurations
     marketplace_configs = {
         "Amazon": {"sheet": "Template", "header_row": 2, "data_row": 4, "sheet_index": None},
-        "Flipkart": {"sheet": None, "header_row": 1, "data_row": 5, "sheet_index": 2}, # This is the config we'll use
+        "Flipkart": {"sheet": None, "header_row": 1, "data_row": 5, "sheet_index": 2},
         "Myntra": {"sheet": None, "header_row": 3, "data_row": 4, "sheet_index": 1},
         "Ajio": {"sheet": None, "header_row": 2, "data_row": 3, "sheet_index": 2},
         "TataCliq": {"sheet": None, "header_row": 4, "data_row": 6, "sheet_index": 0},
@@ -86,29 +86,29 @@ def process_file(input_file, mode: str, marketplace: str, mapping_df: pd.DataFra
     
     try:
         if marketplace == "Flipkart":
-            # 🚀 Special handling for Flipkart
-            # Read the entire sheet first without a header
             xl = pd.ExcelFile(input_file)
             temp_df = xl.parse(xl.sheet_names[config["sheet_index"]], header=None)
-            
-            # The header is in row 1 (index 0)
             header_row = config["header_row"] - 1 
-            # The data starts in row 5 (index 4)
             data_start_row = config["data_row"] - 1
 
-            # Get the header row and clean it
             headers = temp_df.iloc[header_row].tolist()
-            # Set the new DataFrame to start from the data row with the correct headers
             src_df = temp_df.iloc[data_start_row:].copy()
             src_df.columns = headers
             
         elif config["sheet"] is not None:
-            # Handle named sheets
-            src_df = pd.read_excel(input_file, sheet_name=config["sheet"], header=config["header_row"] - 1, skiprows=config["data_row"] - config["header_row"] - 1)
+            src_df = pd.read_excel(
+                input_file,
+                sheet_name=config["sheet"],
+                header=config["header_row"] - 1,
+                skiprows=config["data_row"] - config["header_row"] - 1
+            )
         else:
-            # Handle sheets by index
             xl = pd.ExcelFile(input_file)
-            src_df = xl.parse(xl.sheet_names[config["sheet_index"]], header=config["header_row"] - 1, skiprows=config["data_row"] - config["header_row"] - 1)
+            src_df = xl.parse(
+                xl.sheet_names[config["sheet_index"]],
+                header=config["header_row"] - 1,
+                skiprows=config["data_row"] - config["header_row"] - 1
+            )
             
     except Exception as e:
         st.error(f"Error reading file for {marketplace} template: {e}")
@@ -116,7 +116,6 @@ def process_file(input_file, mode: str, marketplace: str, mapping_df: pd.DataFra
 
     # ────────── DROP COMPLETELY EMPTY COLUMNS ──────────
     src_df.dropna(axis=1, how='all', inplace=True)
-    # ... rest of your code
 
     columns_meta = []
 
@@ -147,28 +146,20 @@ def process_file(input_file, mode: str, marketplace: str, mapping_df: pd.DataFra
             columns_meta.append({"src": col, "out": col, "row3": "mandatory", "row4": dtype})
     
     # ────────── Identify and Extract Color & Size Columns ──────────
-    # The logic here is updated to find all columns that contain 'color' or 'size' in their header.
-    # Instead of finding exact matches, we check for presence in the header string.
-    # The entire data from these columns will be copied.
-    
     color_cols = [col for col in src_df.columns if "color" in norm(col) or "colour" in norm(col)]
-    size_cols = [col for col in src_df.columns if "size" in norm(col)]
+    size_cols  = [col for col in src_df.columns if "size"  in norm(col)]
     
     option1_data = pd.Series([""] * len(src_df), dtype=str)
     option2_data = pd.Series([""] * len(src_df), dtype=str)
     
-    # 🚀 Paste full column data for identified color/size columns
-    # We'll use the first found column for each category.
     if size_cols:
         option1_data = src_df[size_cols[0]].fillna('').astype(str).str.strip()
-        # Ensure we don't pick the same column twice
         if color_cols and color_cols[0] != size_cols[0]:
             option2_data = src_df[color_cols[0]].fillna('').astype(str).str.strip()
     elif color_cols:
         option2_data = src_df[color_cols[0]].fillna('').astype(str).str.strip()
 
     # ────────── BUILD THE WORKBOOK ──────────
-    # This section remains largely the same, but the data for Option 1 & 2 is now the full column data.
     wb = openpyxl.load_workbook(TEMPLATE_PATH)
     ws_vals = wb["Values"]
     ws_types = wb["Types"]
@@ -218,23 +209,17 @@ def process_file(input_file, mode: str, marketplace: str, mapping_df: pd.DataFra
     # Get unique values to add to the 'Types' sheet for validation
     unique_opt1 = option1_data.dropna().unique().tolist()
     unique_opt2 = option2_data.dropna().unique().tolist()
-    
     for i, v in enumerate(unique_opt1, start=5):
         ws_types.cell(row=i, column=t1_col, value=v)
     for i, v in enumerate(unique_opt2, start=5):
         ws_types.cell(row=i, column=t2_col, value=v)
 
-    buf = BytesIO()
-    wb.save(buf)
-    buf.seek(0)
-    return buf
-# ────────── APPEND Flipkart-specific columns at the VERY END ──────────
-    if marketplace == "Flipkart":
-        # Exact-match the input headers (with a safe .strip() on the header names only here)
-        style_code_col = next((c for c in src_df.columns if str(c).strip() == "Style Code"), None)
-        seller_sku_col = next((c for c in src_df.columns if str(c).strip() == "Seller SKU ID"), None)
+    # ────────── Flipkart-only: append variantId/productId AT THE VERY END ──────────
+    if marketplace.strip() == "Flipkart":
+        # Exact header matching as requested
+        style_code_col  = next((c for c in src_df.columns if str(c).strip() == "Style Code"), None)
+        seller_sku_col  = next((c for c in src_df.columns if str(c).strip() == "Seller SKU ID"), None)
 
-        # Warn the user if columns are missing, and fall back to blanks
         if style_code_col is None:
             st.warning("Flipkart: 'Style Code' column not found in input. 'productId' will be blank.")
             product_values = pd.Series([""] * len(src_df), dtype=str)
@@ -247,16 +232,16 @@ def process_file(input_file, mode: str, marketplace: str, mapping_df: pd.DataFra
         else:
             variant_values = src_df[seller_sku_col].fillna("").astype(str)
 
-        # Place AFTER Option 1 & Option 2 (i.e., at the last)
-        # Current last data columns in Values are opt2_col; append next.
-        variant_col = max(opt1_col, opt2_col) + 1
-        product_col = variant_col + 1
+        # Append strictly at the end of Values
+        start_col = ws_vals.max_column + 1
+        variant_col = start_col
+        product_col = start_col + 1
 
-        # Write headers to Values
+        # Values headers
         ws_vals.cell(row=1, column=variant_col, value="variantId")
         ws_vals.cell(row=1, column=product_col, value="productId")
 
-        # Write data to Values (treat as text)
+        # Values data (as text)
         for i, v in enumerate(variant_values.tolist(), start=2):
             cell = ws_vals.cell(row=i, column=variant_col, value=v if v else None)
             cell.number_format = "@"
@@ -264,11 +249,10 @@ def process_file(input_file, mode: str, marketplace: str, mapping_df: pd.DataFra
             cell = ws_vals.cell(row=i, column=product_col, value=v if v else None)
             cell.number_format = "@"
 
-        # Mirror in Types using your existing +2 offset convention
+        # Types alignment: same +2 offset convention
         t_variant_col = variant_col + 2
         t_product_col = product_col + 2
 
-        # Types: Row1 & Row2 = header; Row3 = "mandatory"; Row4 = "string"
         ws_types.cell(row=1, column=t_variant_col, value="variantId")
         ws_types.cell(row=2, column=t_variant_col, value="variantId")
         ws_types.cell(row=3, column=t_variant_col, value="mandatory")
@@ -278,6 +262,11 @@ def process_file(input_file, mode: str, marketplace: str, mapping_df: pd.DataFra
         ws_types.cell(row=2, column=t_product_col, value="productId")
         ws_types.cell(row=3, column=t_product_col, value="mandatory")
         ws_types.cell(row=4, column=t_product_col, value="string")
+
+    buf = BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf
 
 # ───────────────────────── STREAMLIT UI ─────────────────────────
 st.set_page_config(page_title="SKU Template Automation", layout="wide")
