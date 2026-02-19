@@ -204,8 +204,6 @@ src_df = read_input_to_df(
 st.subheader("Preview")
 st.dataframe(src_df.head(5))
 
-st.caption("Built for Rubick.ai | By Vishnu Sai")
-
 if st.button("Generate Output"):
     with st.spinner("Processing…"):
         result = process_file(
@@ -226,3 +224,4 @@ if st.button("Generate Output"):
             file_name="output_template.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+st.caption("Built for Rubick.ai | By Vishnu Sai")
