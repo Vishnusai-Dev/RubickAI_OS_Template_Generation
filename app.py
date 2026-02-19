@@ -73,7 +73,7 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
     If `sheet_name` is provided for General, parse that sheet directly. Returns dataframe or raises exception.
     """
     marketplace_configs = {
-        "Amazon": {"sheet": "Template", "header_row": 4, "data_row": 7, "sheet_index": None},
+        "Amazon": {"sheet": "Template", "header_row": 2, "data_row": 7, "sheet_index": None},
         "Flipkart": {"sheet": None, "header_row": 1, "data_row": 5, "sheet_index": 2},
         "Myntra": {"sheet": None, "header_row": 3, "data_row": 4, "sheet_index": 1},
         "Ajio": {"sheet": None, "header_row": 2, "data_row": 3, "sheet_index": 2},
