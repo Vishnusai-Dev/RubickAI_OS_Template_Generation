@@ -9,7 +9,10 @@ import os
 DEFAULT_TEMPLATE = "sku-template (4).xlsx"
 FALLBACK_UPLOADED_TEMPLATE = "/mnt/data/output_template (62).xlsx"
 
-TEMPLATE_PATH = FALLBACK_UPLOADED_TEMPLATE if os.path.exists(FALLBACK_UPLOADED_TEMPLATE) else DEFAULT_TEMPLATE
+if os.path.exists(FALLBACK_UPLOADED_TEMPLATE):
+    TEMPLATE_PATH = FALLBACK_UPLOADED_TEMPLATE
+else:
+    TEMPLATE_PATH = DEFAULT_TEMPLATE
 
 # ╭───────────────── NORMALISERS & HELPERS ─────────────────╮
 def norm(s) -> str:
@@ -63,8 +66,7 @@ def find_column_by_name_like(src_df: pd.DataFrame, name: str):
 
 def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_name=None):
     marketplace_configs = {
-        # ✅ FIXED AMAZON CONFIG
-        "Amazon": {"sheet": "Template", "header_row": 4, "data_row": 7, "sheet_index": None},
+        "Amazon": {"sheet": "Template", "header_row": 2, "data_row": 7, "sheet_index": None},
         "Flipkart": {"sheet": None, "header_row": 1, "data_row": 5, "sheet_index": 2},
         "Myntra": {"sheet": None, "header_row": 3, "data_row": 4, "sheet_index": 1},
         "Ajio": {"sheet": None, "header_row": 2, "data_row": 3, "sheet_index": 2},
@@ -76,12 +78,16 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
     if marketplace == "General" and sheet_name:
         xl = pd.ExcelFile(input_file)
         src_df = xl.parse(sheet_name, header=header_row - 1, skiprows=data_row - header_row - 1)
+
     elif marketplace == "Flipkart":
         xl = pd.ExcelFile(input_file)
         temp_df = xl.parse(xl.sheet_names[config["sheet_index"]], header=None)
-        headers = temp_df.iloc[config["header_row"] - 1].tolist()
-        src_df = temp_df.iloc[config["data_row"] - 1:].copy()
+        header_idx = config["header_row"] - 1
+        data_idx = config["data_row"] - 1
+        headers = temp_df.iloc[header_idx].tolist()
+        src_df = temp_df.iloc[data_idx:].copy()
         src_df.columns = headers
+
     elif config["sheet"] is not None:
         src_df = pd.read_excel(
             input_file,
@@ -89,6 +95,7 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
             header=config["header_row"] - 1,
             skiprows=config["data_row"] - config["header_row"] - 1
         )
+
     else:
         xl = pd.ExcelFile(input_file)
         src_df = xl.parse(
@@ -97,7 +104,7 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
             skiprows=config["data_row"] - config["header_row"] - 1
         )
 
-    src_df.dropna(axis=1, how="all", inplace=True)
+    src_df.dropna(axis=1, how='all', inplace=True)
     return src_df
 
 # ───────────────────────── STREAMLIT UI ─────────────────────────
@@ -111,24 +118,32 @@ general_header_row = 1
 general_data_row = 2
 
 if marketplace_type == "General":
-    general_header_row = st.number_input("Header row", 1, value=1)
-    general_data_row = st.number_input("Data row", 1, value=2)
+    st.info("Header row = 1, Data row = 2 by default")
+    general_header_row = st.number_input("Header row", min_value=1, value=1)
+    general_data_row = st.number_input("Data row", min_value=1, value=2)
 
 input_file = st.file_uploader("Upload Input Excel File", type=["xlsx", "xls", "xlsm"])
 
 if input_file:
+    selected_sheet = None
+    if marketplace_type == "General":
+        xl = pd.ExcelFile(input_file)
+        selected_sheet = st.selectbox("Select sheet", xl.sheet_names)
+
     try:
         src_df = read_input_to_df(
             input_file,
             marketplace_type,
             header_row=general_header_row,
-            data_row=general_data_row
+            data_row=general_data_row,
+            sheet_name=selected_sheet
         )
         st.subheader("Preview")
         st.dataframe(src_df.head(5))
     except Exception as e:
-        st.error(f"Failed to read file: {e}")
+        st.error(f"Failed to parse uploaded file: {e}")
 else:
     st.info("Upload a file to proceed.")
 
 st.caption("Built for Rubick.ai | By Vishnu Sai")
+
