@@ -205,3 +205,24 @@ st.subheader("Preview")
 st.dataframe(src_df.head(5))
 
 st.caption("Built for Rubick.ai | By Vishnu Sai")
+
+if st.button("Generate Output"):
+    with st.spinner("Processing…"):
+        result = process_file(
+            input_file,
+            marketplace_type,
+            selected_variant_col=None,
+            selected_product_col=None,
+            general_header_row=general_header_row,
+            general_data_row=general_data_row,
+            general_sheet_name=selected_sheet
+        )
+
+    if result:
+        st.success("✅ Output Generated!")
+        st.download_button(
+            "📥 Download Output",
+            data=result,
+            file_name="output_template.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        )
