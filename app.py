@@ -8,7 +8,6 @@ import os
 # ───────────────────────── FILE PATHS ─────────────────────────
 DEFAULT_TEMPLATE = "sku-template (4).xlsx"
 FALLBACK_UPLOADED_TEMPLATE = "/mnt/data/output_template (62).xlsx"
-
 TEMPLATE_PATH = FALLBACK_UPLOADED_TEMPLATE if os.path.exists(FALLBACK_UPLOADED_TEMPLATE) else DEFAULT_TEMPLATE
 
 # ───────────────────────── HELPERS ─────────────────────────
@@ -20,21 +19,20 @@ def norm(s):
 def clean_header(header):
     if pd.isna(header):
         return ""
-    header_str = str(header)
-    header_str = re.sub(r"[^0-9A-Za-z ]+", " ", header_str)
-    header_str = re.sub(r"\s+", " ", header_str).strip()
-    return header_str
+    header = str(header)
+    header = re.sub(r"[^0-9A-Za-z ]+", " ", header)
+    header = re.sub(r"\s+", " ", header).strip()
+    return header
 
 IMAGE_EXT_RE = re.compile(r"(?i)\.(jpe?g|png|gif|bmp|webp|tiff?)$")
 IMAGE_KEYWORDS = {"image", "img", "picture", "photo", "thumbnail", "thumb", "hero", "front", "back", "url"}
 
-def is_image_column(col_header_norm, series):
-    header_hit = any(k in col_header_norm for k in IMAGE_KEYWORDS)
+def is_image_column(col_norm, series):
+    header_hit = any(k in col_norm for k in IMAGE_KEYWORDS)
     sample = series.dropna().astype(str).head(20)
-    ratio = sample.str.contains(IMAGE_EXT_RE).mean() if not sample.empty else 0.0
-    return header_hit or ratio >= 0.30
+    ratio = sample.str.contains(IMAGE_EXT_RE).mean() if not sample.empty else 0
+    return header_hit or ratio >= 0.3
 
-# Marketplace → (productId, variantId)
 MARKETPLACE_ID_MAP = {
     "Amazon": ("Seller SKU", "Parent SKU"),
     "Myntra": ("styleId", "styleGroupId"),
@@ -48,47 +46,51 @@ MARKETPLACE_ID_MAP = {
 def find_column_by_name_like(df, name):
     if not name:
         return None
-    name = norm(name)
+    n = norm(name)
     for c in df.columns:
-        if norm(c) == name or name in norm(c):
+        if n == norm(c) or n in norm(c):
             return c
     return None
 
 # ───────────────────────── INPUT READER ─────────────────────────
 def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_name=None):
 
-    marketplace_configs = {
-        # ✅ FIXED AMAZON CONFIG
-        "Amazon": {"sheet": "Template", "header_row": 4, "data_row": 7, "sheet_index": None},
-
-        "Flipkart": {"sheet": None, "header_row": 1, "data_row": 5, "sheet_index": 2},
-        "Myntra": {"sheet": None, "header_row": 3, "data_row": 4, "sheet_index": 1},
-        "Ajio": {"sheet": None, "header_row": 2, "data_row": 3, "sheet_index": 2},
-        "TataCliq": {"sheet": None, "header_row": 4, "data_row": 6, "sheet_index": 0},
-        "General": {"sheet": None, "header_row": header_row, "data_row": data_row, "sheet_index": 0}
-    }
-
-    config = marketplace_configs.get(marketplace, marketplace_configs["General"])
-
-    if marketplace == "General" and sheet_name:
+    if marketplace == "Amazon":
+        # ✅ SAFE AMAZON PARSER (NO skiprows, NO header guessing)
         xl = pd.ExcelFile(input_file)
-        df = xl.parse(sheet_name, header=header_row - 1,
-                      skiprows=data_row - header_row - 1)
+        temp_df = xl.parse("Template", header=None)
+
+        header_idx = 3   # Excel row 4
+        data_idx = 6     # Excel row 7
+
+        headers = temp_df.iloc[header_idx].tolist()
+        df = temp_df.iloc[data_idx:].copy()
+        df.columns = headers
+
     elif marketplace == "Flipkart":
         xl = pd.ExcelFile(input_file)
-        temp = xl.parse(xl.sheet_names[config["sheet_index"]], header=None)
-        headers = temp.iloc[config["header_row"] - 1]
-        df = temp.iloc[config["data_row"] - 1:]
+        temp_df = xl.parse(xl.sheet_names[2], header=None)
+        headers = temp_df.iloc[0].tolist()
+        df = temp_df.iloc[4:].copy()
         df.columns = headers
+
     else:
-        df = pd.read_excel(
-            input_file,
-            sheet_name=config["sheet"],
-            header=config["header_row"] - 1,
-            skiprows=config["data_row"] - config["header_row"] - 1
+        marketplace_configs = {
+            "Myntra": (1, 3, 4),
+            "Ajio": (2, 2, 3),
+            "TataCliq": (0, 4, 6),
+            "General": (0, header_row, data_row),
+        }
+
+        sheet_idx, hdr, data = marketplace_configs.get(marketplace, marketplace_configs["General"])
+        xl = pd.ExcelFile(input_file)
+        df = xl.parse(
+            xl.sheet_names[sheet_idx],
+            header=hdr - 1,
+            skiprows=data - hdr - 1
         )
 
-    # 🔒 Drop junk Amazon columns
+    # 🔒 Clean junk columns
     df = df.loc[:, ~df.columns.astype(str).str.contains("^Unnamed")]
     df.dropna(axis=1, how="all", inplace=True)
 
@@ -128,13 +130,11 @@ def process_file(
                 return c
         return ws.max_column + 1
 
-    vals_start = first_empty_col(ws_vals, (1,))
-    types_start = first_empty_col(ws_types, (1, 2, 3, 4))
+    v_start = first_empty_col(ws_vals, (1,))
+    t_start = first_empty_col(ws_types, (1, 2, 3, 4))
 
     for i, meta in enumerate(columns_meta):
-        vcol = vals_start + i
-        tcol = types_start + i
-
+        vcol, tcol = v_start + i, t_start + i
         header = clean_header(meta["out"])
 
         ws_vals.cell(1, vcol, header)
@@ -146,25 +146,20 @@ def process_file(
         ws_types.cell(3, tcol, meta["row3"])
         ws_types.cell(4, tcol, meta["row4"])
 
-    # ───────── Option columns ─────────
-    size_cols = [c for c in src_df.columns if "size" in norm(c)]
-    color_cols = [c for c in src_df.columns if "color" in norm(c)]
+    # ───────── Options ─────────
+    size_col = next((c for c in src_df.columns if "size" in norm(c)), None)
+    color_col = next((c for c in src_df.columns if "color" in norm(c)), None)
 
-    opt1 = src_df[size_cols[0]] if size_cols else ""
-    opt2 = src_df[color_cols[0]] if color_cols else ""
-
-    for idx, (name, data) in enumerate([("Option 1", opt1), ("Option 2", opt2)]):
-        v = vals_start + len(columns_meta) + idx
-        t = types_start + len(columns_meta) + idx
-
+    for idx, (name, col) in enumerate([("Option 1", size_col), ("Option 2", color_col)]):
+        v, t = v_start + len(columns_meta) + idx, t_start + len(columns_meta) + idx
         ws_vals.cell(1, v, name)
         ws_types.cell(1, t, name)
         ws_types.cell(2, t, name)
         ws_types.cell(3, t, "non mandatory")
         ws_types.cell(4, t, "select")
 
-        if isinstance(data, pd.Series):
-            for r, val in enumerate(data.fillna("").astype(str), start=2):
+        if col:
+            for r, val in enumerate(src_df[col].fillna("").astype(str), start=2):
                 ws_vals.cell(r, v, val if val else None)
 
     # ───────── variantId / productId ─────────
@@ -173,7 +168,7 @@ def process_file(
         prod_col = find_column_by_name_like(src_df, prod_name)
         var_col = find_column_by_name_like(src_df, var_name)
 
-        start = vals_start + len(columns_meta) + 2
+        start = v_start + len(columns_meta) + 2
 
         for name, col in [("variantId", var_col), ("productId", prod_col)]:
             if col:
@@ -194,7 +189,7 @@ def process_file(
     return buf
 
 # ───────────────────────── STREAMLIT UI ─────────────────────────
-st.set_page_config("SKU Template Automation", layout="wide")
+st.set_page_config(page_title="SKU Template Automation", layout="wide")
 st.title("Rubick OS Template Conversion")
 
 marketplace = st.selectbox(
@@ -202,24 +197,23 @@ marketplace = st.selectbox(
     ["General", "Amazon", "Flipkart", "Myntra", "Ajio", "TataCliq", "Zivame", "Celio"]
 )
 
-input_file = st.file_uploader("Upload Input Excel File", ["xlsx", "xlsm", "xls"])
+input_file = st.file_uploader("Upload Input Excel File", ["xlsx", "xls", "xlsm"])
 
 if input_file:
-    if marketplace == "General":
-        xl = pd.ExcelFile(input_file)
-        sheet = st.selectbox("Select Sheet", xl.sheet_names)
-    else:
-        sheet = None
-
-    df = read_input_to_df(input_file, marketplace, sheet_name=sheet)
+    df = read_input_to_df(input_file, marketplace)
     st.subheader("Preview (first 5 rows)")
     st.dataframe(df.head())
 
     if st.button("Generate Output"):
-        out = process_file(input_file, marketplace, general_sheet_name=sheet)
+        output = process_file(input_file, marketplace)
+        st.success("✅ Output Generated")
         st.download_button(
             "📥 Download Output",
-            data=out,
+            data=output,
             file_name="output_template.xlsx",
             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
         )
+else:
+    st.info("Upload a file to begin.")
+
+st.caption("Built for Rubick.ai | Vishnu Sai G V")
