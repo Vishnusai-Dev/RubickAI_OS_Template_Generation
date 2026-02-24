@@ -35,17 +35,31 @@ def is_image_column(col_header_norm: str, series: pd.Series) -> bool:
     sample = series.dropna().astype(str).head(20)
     ratio = sample.str.contains(IMAGE_EXT_RE).mean() if not sample.empty else 0.0
     return header_hit or ratio >= 0.30
+
+def dedupe_columns(columns):
+    """Make column names unique by appending _1, _2 etc to duplicates."""
+    seen = {}
+    result = []
+    for col in columns:
+        col_str = str(col) if not pd.isna(col) else "Unnamed"
+        if col_str in seen:
+            seen[col_str] += 1
+            result.append(f"{col_str}_{seen[col_str]}")
+        else:
+            seen[col_str] = 0
+            result.append(col_str)
+    return result
 # ╰───────────────────────────────────────────────────────────╯
 
 # Marketplace -> (productId source header, variantId source header)
 MARKETPLACE_ID_MAP = {
-    "Amazon": ("Seller SKU", "Parent SKU"),
-    "Myntra": ("styleId", "styleGroupId"),
-    "Ajio": ("*Item SKU", "*Style Code"),
+    "Amazon":   ("Seller SKU", "Parent SKU"),
+    "Myntra":   ("styleId", "styleGroupId"),
+    "Ajio":     ("*Item SKU", "*Style Code"),
     "Flipkart": ("Seller SKU ID", "Style Code"),
     "TataCliq": ("Seller Article SKU", "*Style Code"),
-    "Zivame": ("Style Code", "SKU Code"),
-    "Celio": ("Style Code", "SKU Code"),
+    "Zivame":   ("Style Code", "SKU Code"),
+    "Celio":    ("Style Code", "SKU Code"),
 }
 
 def find_column_by_name_like(src_df: pd.DataFrame, name: str):
@@ -84,10 +98,10 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
         data_idx = data_row - 1
         headers = temp_df.iloc[header_idx].tolist()
         src_df = temp_df.iloc[data_idx:].copy()
-        src_df.columns = headers
+        src_df.columns = dedupe_columns(headers)
         src_df.reset_index(drop=True, inplace=True)
 
-    # Amazon and any marketplace with a named sheet — FIXED: use raw slice approach
+    # Amazon and any marketplace with a named sheet
     elif config["sheet"] is not None:
         xl = pd.ExcelFile(input_file)
         temp_df = xl.parse(config["sheet"], header=None)
@@ -95,7 +109,7 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
         data_idx = config["data_row"] - 1
         headers = temp_df.iloc[header_idx].tolist()
         src_df = temp_df.iloc[data_idx:].copy()
-        src_df.columns = headers
+        src_df.columns = dedupe_columns(headers)
         src_df.reset_index(drop=True, inplace=True)
 
     # Flipkart and others using sheet_index
@@ -106,7 +120,7 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
         data_idx = config["data_row"] - 1
         headers = temp_df.iloc[header_idx].tolist()
         src_df = temp_df.iloc[data_idx:].copy()
-        src_df.columns = headers
+        src_df.columns = dedupe_columns(headers)
         src_df.reset_index(drop=True, inplace=True)
 
     src_df.dropna(axis=1, how='all', inplace=True)
@@ -345,49 +359,60 @@ if input_file:
                 selected_product_col = st.selectbox("Seller SKU → variantId (leave '(none)' to skip)", options=cols, index=0)
         else:
             st.subheader("Preview (first 5 rows)")
-            st.dataframe(src_df.head(5))
+            try:
+                st.dataframe(src_df.head(5))
+            except Exception as e:
+                st.warning(f"Could not render preview: {e}")
+                st.write(src_df.head(5).to_string())
 
     st.markdown("---")
 
     if marketplace_type == "General":
         if st.button("Generate Output"):
             with st.spinner("Processing…"):
-                result = process_file(
-                    input_file, marketplace_type,
-                    selected_variant_col=selected_variant_col,
-                    selected_product_col=selected_product_col,
-                    general_header_row=general_header_row,
-                    general_data_row=general_data_row,
-                    general_sheet_name=selected_sheet,
-                )
-            if result:
-                st.success("✅ Output Generated!")
-                st.download_button(
-                    "📥 Download Output",
-                    data=result,
-                    file_name="output_template.xlsx",
-                    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                    key="download_button"
-                )
+                try:
+                    result = process_file(
+                        input_file, marketplace_type,
+                        selected_variant_col=selected_variant_col,
+                        selected_product_col=selected_product_col,
+                        general_header_row=general_header_row,
+                        general_data_row=general_data_row,
+                        general_sheet_name=selected_sheet,
+                    )
+                    if result:
+                        st.success("✅ Output Generated!")
+                        st.download_button(
+                            "📥 Download Output",
+                            data=result,
+                            file_name="output_template.xlsx",
+                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            key="download_button"
+                        )
+                except Exception as e:
+                    st.error(f"Processing failed: {e}")
     else:
         with st.spinner("Processing…"):
-            result = process_file(
-                input_file, marketplace_type,
-                selected_variant_col=None,
-                selected_product_col=None,
-                general_header_row=general_header_row,
-                general_data_row=general_data_row,
-                general_sheet_name=None,
-            )
-        if result:
-            st.success("✅ Output Generated!")
-            st.download_button(
-                "📥 Download Output",
-                data=result,
-                file_name="output_template.xlsx",
-                mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                key="download_button"
-            )
+            try:
+                result = process_file(
+                    input_file, marketplace_type,
+                    selected_variant_col=None,
+                    selected_product_col=None,
+                    general_header_row=general_header_row,
+                    general_data_row=general_data_row,
+                    general_sheet_name=None,
+                )
+                if result:
+                    st.success("✅ Output Generated!")
+                    st.download_button(
+                        "📥 Download Output",
+                        data=result,
+                        file_name="output_template.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="download_button"
+                    )
+            except Exception as e:
+                st.error(f"Processing failed: {e}")
+
 else:
     st.info("Upload a file to enable header-detection and column selection dropdowns (General only).")
 
