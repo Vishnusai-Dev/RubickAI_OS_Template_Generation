@@ -53,7 +53,7 @@ def dedupe_columns(columns):
 
 # Marketplace -> (productId source header, variantId source header)
 MARKETPLACE_ID_MAP = {
-    "Amazon":   ("Seller SKU", "Parent SKU"),
+    "Amazon":   ("SKU", "Parent SKU"),
     "Myntra":   ("styleId", "styleGroupId"),
     "Ajio":     ("*Item SKU", "*Style Code"),
     "Flipkart": ("Seller SKU ID", "Style Code"),
