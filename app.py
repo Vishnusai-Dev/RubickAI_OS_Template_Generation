@@ -270,7 +270,11 @@ def process_file(
     columns_meta = []
     for col in src_df.columns:
         dtype = "imageurlarray" if is_image_column(norm(col), src_df[col]) else "string"
-        columns_meta.append({"src": col, "out": col, "row3": "mandatory", "row4": dtype})
+        # Flipkart: rename "Brand" to "Brand Name"
+        out_col = col
+        if marketplace == "Flipkart" and str(col).strip() == "Brand":
+            out_col = "Brand Name"
+        columns_meta.append({"src": col, "out": out_col, "row3": "mandatory", "row4": dtype})
 
     # identify color/size
     color_cols = [col for col in src_df.columns if "color" in norm(col) or "colour" in norm(col)]
