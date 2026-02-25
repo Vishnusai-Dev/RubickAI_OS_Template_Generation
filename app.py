@@ -37,7 +37,6 @@ def is_image_column(col_header_norm: str, series: pd.Series) -> bool:
     return header_hit or ratio >= 0.30
 
 def dedupe_columns(columns):
-    """Make column names unique by appending _1, _2 etc to duplicates."""
     seen = {}
     result = []
     for col in columns:
@@ -51,9 +50,8 @@ def dedupe_columns(columns):
     return result
 # ╰───────────────────────────────────────────────────────────╯
 
-# Marketplace -> (productId source header, variantId source header)
 MARKETPLACE_ID_MAP = {
-    "Amazon":   ("SKU", "Parent SKU"),
+    "Amazon":   ("Parent SKU", "SKU"),
     "Myntra":   ("styleId", "styleGroupId"),
     "Ajio":     ("*Item SKU", "*Style Code"),
     "Flipkart": ("Seller SKU ID", "Style Code"),
@@ -111,6 +109,19 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
         src_df = temp_df.iloc[data_idx:].copy()
         src_df.columns = dedupe_columns(headers)
         src_df.reset_index(drop=True, inplace=True)
+
+        # ── Amazon-specific: drop rows where Parentage Level == "Parent" ──
+        if marketplace == "Amazon":
+            parentage_col = find_column_by_name_like(src_df, "Parentage Level")
+            if parentage_col:
+                before = len(src_df)
+                src_df = src_df[
+                    src_df[parentage_col].astype(str).str.strip().str.lower() != "parent"
+                ].copy()
+                src_df.reset_index(drop=True, inplace=True)
+                after = len(src_df)
+                # Store count for UI display (optional)
+                src_df.attrs["filtered_parent_rows"] = before - after
 
     # Flipkart and others using sheet_index
     else:
@@ -358,6 +369,11 @@ if input_file:
             with col2:
                 selected_product_col = st.selectbox("Seller SKU → variantId (leave '(none)' to skip)", options=cols, index=0)
         else:
+            # Show how many parent rows were filtered for Amazon
+            if marketplace_type == "Amazon":
+                filtered = src_df.attrs.get("filtered_parent_rows", 0)
+                if filtered:
+                    st.info(f"ℹ️ {filtered} Parent row(s) removed (Parentage Level = 'Parent')")
             st.subheader("Preview (first 5 rows)")
             try:
                 st.dataframe(src_df.head(5))
