@@ -61,9 +61,7 @@ else:
 #  7. Paste that URL as the value of  APPS_SCRIPT_URL  below
 # ═══════════════════════════════════════════════════════════════
 
-APPS_SCRIPT_URL = ""   # ← PASTE YOUR WEB APP URL HERE
-# Example:
-# APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycb.../exec"
+APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbxiCe1IVsghaaFa4zJvA-YuCowvvT3JzLZag1IAp9B8MFGk6w8hI4aBpoB_WsqWkbbLPg/exec"
 
 # ── Optionally load from Streamlit secrets (for cloud deployments) ──
 try:
