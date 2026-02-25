@@ -2,16 +2,133 @@ import streamlit as st
 import pandas as pd
 import openpyxl
 import re
-from io import BytesIO
+import requests
 import os
+from io import BytesIO
 
 # ───────────────────────── FILE PATHS ─────────────────────────
 DEFAULT_TEMPLATE = "sku-template (4).xlsx"
 FALLBACK_UPLOADED_TEMPLATE = "/mnt/data/output_template (62).xlsx"
+
 if os.path.exists(FALLBACK_UPLOADED_TEMPLATE):
     TEMPLATE_PATH = FALLBACK_UPLOADED_TEMPLATE
 else:
     TEMPLATE_PATH = DEFAULT_TEMPLATE
+
+# ═══════════════════════════════════════════════════════════════
+#  BATCH ID  —  Stored in Google Sheets, shared across all users
+#
+#  HOW IT WORKS:
+#    A Google Apps Script Web App acts as a tiny API sitting in
+#    front of your sheet. It handles GET (read) and POST (write).
+#    Because it's deployed as "Anyone, even anonymous" it needs
+#    zero credentials — just an HTTP call.
+#
+#  ONE-TIME SETUP (~3 minutes):
+#  ─────────────────────────────
+#  1. Open your Google Sheet:
+#     https://docs.google.com/spreadsheets/d/1oxtgaZmfJseMoiOlqGRkm2pWSQoga5Ys-jcDZGTUFEM
+#  2. Put the number  1  in cell A1  (this is your starting BatchID)
+#  3. Click  Extensions → Apps Script
+#  4. Delete any existing code and paste this ENTIRE script:
+#
+# ┌──────────────────────────────────────────────────────────────
+# │ var SHEET_ID = "1oxtgaZmfJseMoiOlqGRkm2pWSQoga5Ys-jcDZGTUFEM";
+# │
+# │ function doGet(e) {
+# │   var sheet = SpreadsheetApp.openById(SHEET_ID).getSheets()[0];
+# │   var val = sheet.getRange("A1").getValue();
+# │   return ContentService
+# │     .createTextOutput(JSON.stringify({ batch_id: val }))
+# │     .setMimeType(ContentService.MimeType.JSON);
+# │ }
+# │
+# │ function doPost(e) {
+# │   var data  = JSON.parse(e.postData.contents);
+# │   var sheet = SpreadsheetApp.openById(SHEET_ID).getSheets()[0];
+# │   sheet.getRange("A1").setValue(data.next_id);
+# │   return ContentService
+# │     .createTextOutput(JSON.stringify({ ok: true, saved: data.next_id }))
+# │     .setMimeType(ContentService.MimeType.JSON);
+# │ }
+# └──────────────────────────────────────────────────────────────
+#
+#  5. Click  Deploy → New deployment
+#     • Type: Web app
+#     • Execute as: Me
+#     • Who has access: Anyone
+#  6. Click Deploy → copy the Web App URL
+#  7. Paste that URL as the value of  APPS_SCRIPT_URL  below
+# ═══════════════════════════════════════════════════════════════
+
+APPS_SCRIPT_URL = ""   # ← PASTE YOUR WEB APP URL HERE
+# Example:
+# APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycb.../exec"
+
+# ── Optionally load from Streamlit secrets (for cloud deployments) ──
+try:
+    if not APPS_SCRIPT_URL:
+        APPS_SCRIPT_URL = st.secrets["APPS_SCRIPT_URL"]
+except Exception:
+    pass
+
+# ── Local file fallback (single machine, used if URL not set) ──
+_FALLBACK_FILE = "batch_id_counter.json"
+
+def _local_read() -> int:
+    import json
+    if os.path.exists(_FALLBACK_FILE):
+        try:
+            with open(_FALLBACK_FILE) as f:
+                return int(json.load(f).get("v", 1))
+        except Exception:
+            pass
+    return 1
+
+def _local_write(v: int):
+    import json
+    tmp = _FALLBACK_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump({"v": v}, f)
+    os.replace(tmp, _FALLBACK_FILE)
+
+# ── Google Sheets read / write via Apps Script ─────────────────
+def _remote_read() -> int:
+    r = requests.get(APPS_SCRIPT_URL, timeout=10)
+    r.raise_for_status()
+    return int(r.json()["batch_id"])
+
+def _remote_write(next_id: int):
+    r = requests.post(APPS_SCRIPT_URL, json={"next_id": next_id}, timeout=10)
+    r.raise_for_status()
+
+# ── Public helpers ─────────────────────────────────────────────
+def peek_next_batch_id() -> int:
+    """Read current BatchID without consuming it (for UI display)."""
+    if APPS_SCRIPT_URL:
+        try:
+            return _remote_read()
+        except Exception:
+            pass
+    return _local_read()
+
+def get_and_increment_batch_id() -> int:
+    """
+    Atomically claim the current BatchID and advance the counter.
+    Returns the claimed BatchID.
+    """
+    if APPS_SCRIPT_URL:
+        try:
+            current = _remote_read()
+            _remote_write(current + 1)
+            return current
+        except Exception as e:
+            st.warning(f"⚠️ Google Sheets BatchID unavailable ({e}). Using local counter.")
+    # Fallback
+    current = _local_read()
+    _local_write(current + 1)
+    return current
+
 
 # ╭───────────────── NORMALISERS & HELPERS ─────────────────╮
 def norm(s) -> str:
@@ -85,10 +202,8 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
         "TataCliq": {"sheet": None,       "header_row": 4, "data_row": 6,  "sheet_index": 0},
         "General":  {"sheet": None,       "header_row": header_row, "data_row": data_row, "sheet_index": 0}
     }
-
     config = marketplace_configs.get(marketplace, marketplace_configs["General"])
 
-    # General with explicit sheet name
     if marketplace == "General" and sheet_name:
         xl = pd.ExcelFile(input_file)
         temp_df = xl.parse(sheet_name, header=None)
@@ -99,7 +214,6 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
         src_df.columns = dedupe_columns(headers)
         src_df.reset_index(drop=True, inplace=True)
 
-    # Amazon and any marketplace with a named sheet
     elif config["sheet"] is not None:
         xl = pd.ExcelFile(input_file)
         temp_df = xl.parse(config["sheet"], header=None)
@@ -109,8 +223,6 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
         src_df = temp_df.iloc[data_idx:].copy()
         src_df.columns = dedupe_columns(headers)
         src_df.reset_index(drop=True, inplace=True)
-
-        # ── Amazon-specific: drop rows where Parentage Level == "Parent" ──
         if marketplace == "Amazon":
             parentage_col = find_column_by_name_like(src_df, "Parentage Level")
             if parentage_col:
@@ -120,10 +232,7 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
                 ].copy()
                 src_df.reset_index(drop=True, inplace=True)
                 after = len(src_df)
-                # Store count for UI display (optional)
                 src_df.attrs["filtered_parent_rows"] = before - after
-
-    # Flipkart and others using sheet_index
     else:
         xl = pd.ExcelFile(input_file)
         temp_df = xl.parse(xl.sheet_names[config["sheet_index"]], header=None)
@@ -154,6 +263,11 @@ def process_file(
         sheet_name=general_sheet_name
     )
 
+    # ── Claim BatchID FIRST (before any processing) ──────────────
+    batch_id     = get_and_increment_batch_id()
+    batch_id_str = str(batch_id)
+    num_rows     = len(src_df)
+
     # auto-map every column
     columns_meta = []
     for col in src_df.columns:
@@ -164,9 +278,8 @@ def process_file(
     color_cols = [col for col in src_df.columns if "color" in norm(col) or "colour" in norm(col)]
     size_cols  = [col for col in src_df.columns if "size" in norm(col)]
 
-    option1_data = pd.Series([""] * len(src_df), dtype=str)
-    option2_data = pd.Series([""] * len(src_df), dtype=str)
-
+    option1_data = pd.Series([""] * num_rows, dtype=str)
+    option2_data = pd.Series([""] * num_rows, dtype=str)
     if size_cols:
         option1_data = src_df[size_cols[0]].fillna('').astype(str).str.strip()
         if color_cols and color_cols[0] != size_cols[0]:
@@ -201,7 +314,6 @@ def process_file(
         vcol = vals_start_col  + idx
         tcol = types_start_col + idx
         header_display = clean_header(meta["out"])
-
         ws_vals.cell(row=1, column=vcol, value=header_display)
         for r_idx, value in enumerate(src_df[meta["src"]].tolist(), start=2):
             cell = ws_vals.cell(row=r_idx, column=vcol)
@@ -213,7 +325,6 @@ def process_file(
                     cell.number_format = "@"
                 else:
                     cell.value = value
-
         ws_types.cell(row=1, column=tcol, value=header_display)
         ws_types.cell(row=2, column=tcol, value=header_display)
         ws_types.cell(row=3, column=tcol, value=meta["row3"])
@@ -250,12 +361,10 @@ def process_file(
         has_prod = product_series is not None and product_series.replace("", pd.NA).dropna().shape[0] > 0
         if not (has_var or has_prod):
             return
-
         after_written_vals  = vals_start_col  + len(columns_meta) + 2
         after_written_types = types_start_col + len(columns_meta) + 2
         cur_v = after_written_vals
         cur_t = after_written_types
-
         if has_var:
             ws_vals.cell(row=1, column=cur_v, value="variantId")
             for i, v in enumerate(variant_series.tolist(), start=2):
@@ -267,7 +376,6 @@ def process_file(
             ws_types.cell(row=4, column=cur_t, value="string")
             cur_v += 1
             cur_t += 1
-
         if has_prod:
             ws_vals.cell(row=1, column=cur_v, value="productId")
             for i, v in enumerate(product_series.tolist(), start=2):
@@ -298,15 +406,42 @@ def process_file(
             var_series  = src_df[var_col].fillna("").astype(str)  if var_col  else None
             append_id_columns(var_series, prod_series)
 
+    # ── BatchID column — always the very last column ──────────────
+    bv_col = first_empty_col(ws_vals, header_rows=(1,))
+    ws_vals.cell(row=1, column=bv_col, value="BatchID")
+    for r in range(2, num_rows + 2):
+        cell = ws_vals.cell(row=r, column=bv_col, value=batch_id_str)
+        cell.number_format = "@"
+
+    bt_col = first_empty_col(ws_types, header_rows=(1, 2, 3, 4))
+    ws_types.cell(row=1, column=bt_col, value="BatchID")
+    ws_types.cell(row=2, column=bt_col, value="BatchID")
+    ws_types.cell(row=3, column=bt_col, value="non mandatory")
+    ws_types.cell(row=4, column=bt_col, value="string")
+    # ─────────────────────────────────────────────────────────────
+
     buf = BytesIO()
     wb.save(buf)
     buf.seek(0)
-    return buf
+    return buf, batch_id
 
 
 # ───────────────────────── STREAMLIT UI ─────────────────────────
 st.set_page_config(page_title="SKU Template Automation", layout="wide")
 st.title("Rubick OS Template Conversion")
+
+# Warn if Apps Script URL not configured
+if not APPS_SCRIPT_URL:
+    st.warning(
+        "⚠️ **BatchID Google Sheets sync not configured.**  \n"
+        "Set `APPS_SCRIPT_URL` in the code (or `secrets.toml`) after completing the "
+        "one-time Apps Script setup described in the code comments.  \n"
+        "Until then, BatchID falls back to a local file counter."
+    )
+
+# Show next BatchID (read-only peek)
+next_id = peek_next_batch_id()
+st.info(f"📦 Next BatchID to be assigned: **{next_id}**")
 
 if os.path.exists(TEMPLATE_PATH):
     st.info(f"Using template: {os.path.basename(TEMPLATE_PATH)}")
@@ -369,7 +504,6 @@ if input_file:
             with col2:
                 selected_product_col = st.selectbox("Seller SKU → variantId (leave '(none)' to skip)", options=cols, index=0)
         else:
-            # Show how many parent rows were filtered for Amazon
             if marketplace_type == "Amazon":
                 filtered = src_df.attrs.get("filtered_parent_rows", 0)
                 if filtered:
@@ -387,7 +521,7 @@ if input_file:
         if st.button("Generate Output"):
             with st.spinner("Processing…"):
                 try:
-                    result = process_file(
+                    result, assigned_batch_id = process_file(
                         input_file, marketplace_type,
                         selected_variant_col=selected_variant_col,
                         selected_product_col=selected_product_col,
@@ -396,11 +530,11 @@ if input_file:
                         general_sheet_name=selected_sheet,
                     )
                     if result:
-                        st.success("✅ Output Generated!")
+                        st.success(f"✅ Output Generated! — BatchID assigned: **{assigned_batch_id}**")
                         st.download_button(
                             "📥 Download Output",
                             data=result,
-                            file_name="output_template.xlsx",
+                            file_name=f"output_template_batch{assigned_batch_id}.xlsx",
                             mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                             key="download_button"
                         )
@@ -409,7 +543,7 @@ if input_file:
     else:
         with st.spinner("Processing…"):
             try:
-                result = process_file(
+                result, assigned_batch_id = process_file(
                     input_file, marketplace_type,
                     selected_variant_col=None,
                     selected_product_col=None,
@@ -418,17 +552,16 @@ if input_file:
                     general_sheet_name=None,
                 )
                 if result:
-                    st.success("✅ Output Generated!")
+                    st.success(f"✅ Output Generated! — BatchID assigned: **{assigned_batch_id}**")
                     st.download_button(
                         "📥 Download Output",
                         data=result,
-                        file_name="output_template.xlsx",
+                        file_name=f"output_template_batch{assigned_batch_id}.xlsx",
                         mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                         key="download_button"
                     )
             except Exception as e:
                 st.error(f"Processing failed: {e}")
-
 else:
     st.info("Upload a file to enable header-detection and column selection dropdowns (General only).")
 
