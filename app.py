@@ -460,9 +460,22 @@ marketplace_type = st.selectbox("Select Template Type", marketplace_options)
 general_header_row = 1
 general_data_row   = 2
 if marketplace_type == "General":
-    st.info("Callout: If header/data rows are left as default we will assume Header row = 1 and Data row = 2.")
-    general_header_row = st.number_input("Header row (1-indexed)", min_value=1, value=1, step=1)
-    general_data_row   = st.number_input("Data row (1-indexed)",   min_value=1, value=2, step=1)
+    st.info("Callout: Leave blank to use defaults — Header row = 1, Data row = 2.")
+    col_h, col_d = st.columns(2)
+    with col_h:
+        _hr = st.text_input("Header row (1-indexed)", value="", placeholder="Default: 1")
+    with col_d:
+        _dr = st.text_input("Data row (1-indexed)", value="", placeholder="Default: 2")
+    try:
+        general_header_row = int(_hr.strip()) if _hr.strip() else 1
+    except ValueError:
+        st.error("Header row must be a number.")
+        general_header_row = 1
+    try:
+        general_data_row = int(_dr.strip()) if _dr.strip() else 2
+    except ValueError:
+        st.error("Data row must be a number.")
+        general_data_row = 2
 
 input_file = st.file_uploader("Upload Input Excel File", type=["xlsx", "xls", "xlsm"])
 
