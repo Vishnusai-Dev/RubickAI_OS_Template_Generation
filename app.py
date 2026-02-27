@@ -199,7 +199,7 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
         "Myntra":   {"sheet": None,       "header_row": 3, "data_row": 4,  "sheet_index": 1},
         "Ajio":     {"sheet": None,       "header_row": 2, "data_row": 3,  "sheet_index": 2},
         "TataCliq": {"sheet": None,       "header_row": 4, "data_row": 6,  "sheet_index": 0},
-        "Meesho":   {"sheet": None,       "header_row": 3, "data_row": 5,  "sheet_index": 2},
+        "Meesho":   {"sheet": None,       "header_row": 3, "data_row": 5,  "sheet_index": 1},
         "General":  {"sheet": None,       "header_row": header_row, "data_row": data_row, "sheet_index": 0}
     }
     config = marketplace_configs.get(marketplace, marketplace_configs["General"])
@@ -234,14 +234,33 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
                 after = len(src_df)
                 src_df.attrs["filtered_parent_rows"] = before - after
     else:
-        xl = pd.ExcelFile(input_file)
-        temp_df = xl.parse(xl.sheet_names[config["sheet_index"]], header=None)
-        header_idx = config["header_row"] - 1
-        data_idx = config["data_row"] - 1
-        headers = temp_df.iloc[header_idx].tolist()
-        src_df = temp_df.iloc[data_idx:].copy()
-        src_df.columns = dedupe_columns(headers)
-        src_df.reset_index(drop=True, inplace=True)
+        if marketplace == "Meesho":
+            # Meesho files have merged cells that confuse pandas row count.
+            # Use openpyxl directly to read all rows reliably.
+            import openpyxl as _oxl
+            from io import BytesIO as _BytesIO
+            _wb = _oxl.load_workbook(input_file if not hasattr(input_file, "read") else input_file, data_only=True)
+            _ws = _wb.worksheets[config["sheet_index"]]
+            header_idx = config["header_row"]       # 1-based row number
+            data_idx   = config["data_row"]         # 1-based row number
+            # Read header row
+            headers = [_ws.cell(row=header_idx, column=c).value for c in range(1, _ws.max_column + 1)]
+            # Read data rows
+            data_rows = []
+            for r in range(data_idx, _ws.max_row + 1):
+                row_vals = [_ws.cell(row=r, column=c).value for c in range(1, _ws.max_column + 1)]
+                data_rows.append(row_vals)
+            src_df = pd.DataFrame(data_rows, columns=dedupe_columns(headers))
+            src_df.reset_index(drop=True, inplace=True)
+        else:
+            xl = pd.ExcelFile(input_file)
+            temp_df = xl.parse(xl.sheet_names[config["sheet_index"]], header=None)
+            header_idx = config["header_row"] - 1
+            data_idx = config["data_row"] - 1
+            headers = temp_df.iloc[header_idx].tolist()
+            src_df = temp_df.iloc[data_idx:].copy()
+            src_df.columns = dedupe_columns(headers)
+            src_df.reset_index(drop=True, inplace=True)
 
     src_df.dropna(axis=1, how='all', inplace=True)
     return src_df
@@ -271,9 +290,12 @@ def process_file(
     # auto-map every column
     columns_meta = []
     for col in src_df.columns:
-        # Meesho: column headers are multi-line — keep only the first line as the label
+        # Meesho: column headers are in format "\n\nField Name\n\nDescription\n"
+        # Split by newline, take first non-empty part as the field name
         if marketplace == "Meesho":
-            display_col = str(col).split("\n")[0].strip()
+            raw = str(col)
+            parts = [p.strip() for p in raw.split("\n") if p.strip()]
+            display_col = parts[0] if parts else raw.strip()
         else:
             display_col = col
         dtype = "imageurlarray" if is_image_column(norm(col), src_df[col]) else "string"
