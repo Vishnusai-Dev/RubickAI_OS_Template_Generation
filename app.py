@@ -173,6 +173,7 @@ MARKETPLACE_ID_MAP = {
     "TataCliq": ("Seller Article SKU", "*Style Code"),
     "Zivame":   ("Style Code", "SKU Code"),
     "Celio":    ("Style Code", "SKU Code"),
+    "Meesho":   ("Product ID / Style ID", "SKU ID"),
 }
 
 def find_column_by_name_like(src_df: pd.DataFrame, name: str):
@@ -198,6 +199,7 @@ def read_input_to_df(input_file, marketplace, header_row=1, data_row=2, sheet_na
         "Myntra":   {"sheet": None,       "header_row": 3, "data_row": 4,  "sheet_index": 1},
         "Ajio":     {"sheet": None,       "header_row": 2, "data_row": 3,  "sheet_index": 2},
         "TataCliq": {"sheet": None,       "header_row": 4, "data_row": 6,  "sheet_index": 0},
+        "Meesho":   {"sheet": None,       "header_row": 3, "data_row": 5,  "sheet_index": 2},
         "General":  {"sheet": None,       "header_row": header_row, "data_row": data_row, "sheet_index": 0}
     }
     config = marketplace_configs.get(marketplace, marketplace_configs["General"])
@@ -269,12 +271,22 @@ def process_file(
     # auto-map every column
     columns_meta = []
     for col in src_df.columns:
+        # Meesho: column headers are multi-line — keep only the first line as the label
+        if marketplace == "Meesho":
+            display_col = str(col).split("\n")[0].strip()
+        else:
+            display_col = col
         dtype = "imageurlarray" if is_image_column(norm(col), src_df[col]) else "string"
         # Flipkart: rename "Brand" to "Brand Name"
+        # Meesho: column header is long text starting with "Brand Name" — normalise to clean label
         out_col = col
         if marketplace == "Flipkart" and str(col).strip() == "Brand":
             out_col = "Brand Name"
-        columns_meta.append({"src": col, "out": out_col, "row3": "mandatory", "row4": dtype})
+        elif marketplace == "Meesho" and norm(col).startswith("brandname"):
+            out_col = "Brand Name"
+        # Use display_col as base for out, unless already renamed (e.g. Brand)
+        final_out = out_col if out_col != col else display_col
+        columns_meta.append({"src": col, "out": final_out, "row3": "mandatory", "row4": dtype})
 
     # identify color/size
     color_cols = [col for col in src_df.columns if "color" in norm(col) or "colour" in norm(col)]
@@ -458,7 +470,7 @@ if os.path.exists(TEMPLATE_PATH):
     except Exception:
         pass
 
-marketplace_options = ["General", "Amazon", "Flipkart", "Myntra", "Ajio", "TataCliq", "Zivame", "Celio"]
+marketplace_options = ["General", "Amazon", "Flipkart", "Myntra", "Ajio", "TataCliq", "Zivame", "Celio", "Meesho"]
 marketplace_type = st.selectbox("Select Template Type", marketplace_options)
 
 general_header_row = 1
