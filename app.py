@@ -121,7 +121,7 @@ def get_and_increment_batch_id() -> int:
             _remote_write(current + 1)
             return current
         except Exception as e:
-            st.warning(f"⚠️ Google Sheets BatchID unavailable ({e}). Using local counter.")
+            pass  # Silently fall back to local counter if Google Sheets is unavailable
     # Fallback
     current = _local_read()
     _local_write(current + 1)
