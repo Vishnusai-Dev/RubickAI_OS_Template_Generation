@@ -442,12 +442,24 @@ def process_file(
             var_series  = src_df[var_col].fillna("").astype(str)  if var_col  else None
             append_id_columns(var_series, prod_series)
 
-    # ── BatchID column — always the very last column ──────────────
+    # ── BatchID column — only for rows that have actual data ────────
+    # A row is considered "has data" if at least one cell in that row
+    # (across all src_df columns) is non-null and non-empty string.
+    has_data_mask = src_df.apply(
+        lambda row: any(
+            str(v).strip() not in ("", "nan", "None")
+            for v in row
+            if v is not None and not (isinstance(v, float) and __import__("math").isnan(v))
+        ),
+        axis=1
+    )
     bv_col = first_empty_col(ws_vals, header_rows=(1,))
     ws_vals.cell(row=1, column=bv_col, value="BatchID")
-    for r in range(2, num_rows + 2):
-        cell = ws_vals.cell(row=r, column=bv_col, value=batch_id_str)
-        cell.number_format = "@"
+    for df_idx, has_data in enumerate(has_data_mask):
+        if has_data:
+            r = df_idx + 2  # +2 because row 1 is header, df is 0-indexed
+            cell = ws_vals.cell(row=r, column=bv_col, value=batch_id_str)
+            cell.number_format = "@"
 
     bt_col = first_empty_col(ws_types, header_rows=(1, 2, 3, 4))
     ws_types.cell(row=1, column=bt_col, value="BatchID")
